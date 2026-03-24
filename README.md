@@ -1,9 +1,5 @@
- (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
-diff --git a/README.md b/README.md
-index 5a8cfe2af96a5d45577b6a7e9c6431c3f30e55c9..7bdae9af39be7377238f656fdd84bb2c7d59aa94 100644
---- a/README.md
-+++ b/README.md
-@@ -11,33 +11,40 @@ Aplicación de escritorio para gestionar de forma segura las credenciales de tus
+
+Aplicación de escritorio para gestionar de forma segura las credenciales de tus
  - Autenticación de usuarios con Supabase Auth
  - Base de datos en la nube con Row Level Security — cada usuario solo ve sus propios datos
  - Recuperación de contraseña por email
