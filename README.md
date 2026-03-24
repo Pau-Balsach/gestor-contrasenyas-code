@@ -14,7 +14,9 @@ Aplicación de escritorio para gestionar de forma segura las credenciales de tus
 
 ## 🚀 Descarga e Instalación
 
-Próximamente disponible en la sección de lanzamientos.
+La forma más sencilla de usar TrackLectura en Windows es descargando el instalador oficial desde nuestra sección de lanzamientos:
+
+👉 **[Descargar Gestror-Contraseñas v1.1(.exe)](https://github.com/Pau-Balsach/gestor-contrasenas-code/releases/latest/download/gestor-contraseñas-v1.1.exe)**
 
 ## Requisitos
 
