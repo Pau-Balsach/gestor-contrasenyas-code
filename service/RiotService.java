@@ -52,75 +52,173 @@ public class RiotService {
             String tagLine  = java.net.URLEncoder.encode(partes[1], "UTF-8");
 
             HttpClient client = HttpClient.newHttpClient();
-            HttpRequest request = HttpRequest.newBuilder()
+
+            // 1. v3/mmr
+            HttpRequest req1 = HttpRequest.newBuilder()
                     .uri(URI.create("https://api.henrikdev.xyz/valorant/v3/mmr/eu/pc/" + gameName + "/" + tagLine))
                     .header("Accept", "application/json")
                     .header("Authorization", HENRIK_KEY)
-                    .GET()
-                    .build();
+                    .GET().build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) return "Sin rango";
+            HttpResponse<String> res1 = client.send(req1, HttpResponse.BodyHandlers.ofString());
+            System.out.println("[DEBUG MMR-V3] " + riotId + " HTTP=" + res1.statusCode());
+            System.out.println("[DEBUG MMR-V3 BODY] " + res1.body());
 
-            com.google.gson.JsonObject json = com.google.gson.JsonParser
-                    .parseString(response.body()).getAsJsonObject();
+            if (res1.statusCode() == 200) {
+                com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(res1.body()).getAsJsonObject();
+                System.out.println("[DEBUG MMR-V3 KEYS] " + root.keySet());
 
-            if (!json.has("data") || json.get("data").isJsonNull()) return "Sin rango";
-            com.google.gson.JsonObject data = json.getAsJsonObject("data");
+                if (root.has("data") && !root.get("data").isJsonNull()) {
+                    com.google.gson.JsonObject data = root.getAsJsonObject("data");
+                    System.out.println("[DEBUG MMR-V3 DATA KEYS] " + data.keySet());
 
-            // Leer rango actual
-            String rangoActual = null;
-            int tierActualId   = -1;
-            if (data.has("current") && !data.get("current").isJsonNull()) {
-                com.google.gson.JsonObject current = data.getAsJsonObject("current");
-                if (current.has("tier") && !current.get("tier").isJsonNull()) {
-                    com.google.gson.JsonObject tier = current.getAsJsonObject("tier");
-                    tierActualId = tier.has("id") ? tier.get("id").getAsInt() : -1;
-                    rangoActual  = tier.has("name") ? tier.get("name").getAsString() : null;
-                }
-            }
-
-            // Si el rango actual es valido (no Unrated: id > 1), devolverlo directamente
-            boolean esUnrated = tierActualId <= 1 || "Unrated".equalsIgnoreCase(rangoActual);
-            if (!esUnrated && rangoActual != null) {
-                return rangoActual;
-            }
-
-            // Rango actual es Unrated: buscar en seasonal el rango mas reciente conocido.
-            // El array viene ordenado de mas ANTIGUO a mas RECIENTE, asi que iteramos al reves.
-            if (data.has("seasonal") && !data.get("seasonal").isJsonNull()) {
-                com.google.gson.JsonArray seasonal = data.getAsJsonArray("seasonal");
-                for (int i = seasonal.size() - 1; i >= 0; i--) {
-                    com.google.gson.JsonObject temporada = seasonal.get(i).getAsJsonObject();
-                    if (!temporada.has("end_tier") || temporada.get("end_tier").isJsonNull()) continue;
-
-                    com.google.gson.JsonObject endTier = temporada.getAsJsonObject("end_tier");
-                    int endId        = endTier.has("id")   ? endTier.get("id").getAsInt()     : -1;
-                    String endNombre = endTier.has("name") ? endTier.get("name").getAsString() : null;
-
-                    // Ignorar entradas que tambien sean Unrated
-                    if (endId <= 1 || "Unrated".equalsIgnoreCase(endNombre) || endNombre == null) continue;
-
-                    // Obtener la etiqueta de temporada
-                    String etiqueta = " (temp. anterior)";
-                    if (temporada.has("season") && !temporada.get("season").isJsonNull()) {
-                        com.google.gson.JsonObject season = temporada.getAsJsonObject("season");
-                        if (season.has("short") && !season.get("short").isJsonNull()) {
-                            etiqueta = " (" + season.get("short").getAsString() + ")";
+                    // current
+                    int curId = -1; String curName = null;
+                    if (data.has("current") && !data.get("current").isJsonNull()) {
+                        com.google.gson.JsonObject cur = data.getAsJsonObject("current");
+                        System.out.println("[DEBUG current] " + cur);
+                        if (cur.has("tier") && !cur.get("tier").isJsonNull()) {
+                            com.google.gson.JsonObject t = cur.getAsJsonObject("tier");
+                            curId = t.has("id") ? t.get("id").getAsInt() : -1;
+                            curName = t.has("name") ? t.get("name").getAsString() : null;
                         }
                     }
+                    System.out.println("[DEBUG 1] current → id=" + curId + " name=" + curName);
+                    if (esRangoValido(curId, curName)) return curName;
 
-                    return endNombre + etiqueta;
+                    // seasonal
+                    if (data.has("seasonal") && !data.get("seasonal").isJsonNull()) {
+                        com.google.gson.JsonArray seasonal = data.getAsJsonArray("seasonal");
+                        System.out.println("[DEBUG 2] seasonal.size=" + seasonal.size());
+                        for (int i = seasonal.size() - 1; i >= 0; i--) {
+                            com.google.gson.JsonObject s = seasonal.get(i).getAsJsonObject();
+                            System.out.println("[DEBUG 2] seasonal[" + i + "] keys=" + s.keySet() + " val=" + s);
+                            String etq = obtenerEtiquetaTemporada(s);
+
+                            if (s.has("end_tier") && !s.get("end_tier").isJsonNull()) {
+                                com.google.gson.JsonObject et = s.getAsJsonObject("end_tier");
+                                int etId = et.has("id") ? et.get("id").getAsInt() : -1;
+                                String etName = et.has("name") ? et.get("name").getAsString() : null;
+                                System.out.println("[DEBUG 2a] end_tier id=" + etId + " name=" + etName);
+                                if (esRangoValido(etId, etName)) return etName + etq;
+                            } else {
+                                System.out.println("[DEBUG 2a] end_tier missing");
+                            }
+
+                            if (s.has("act_wins") && !s.get("act_wins").isJsonNull()) {
+                                com.google.gson.JsonArray aw = s.getAsJsonArray("act_wins");
+                                System.out.println("[DEBUG 2b] act_wins.size=" + aw.size());
+                                int bestId = -1; String bestName = null;
+                                for (com.google.gson.JsonElement we : aw) {
+                                    com.google.gson.JsonObject w = we.getAsJsonObject();
+                                    int wId = w.has("id") ? w.get("id").getAsInt() : -1;
+                                    String wName = w.has("name") ? w.get("name").getAsString() : null;
+                                    System.out.println("[DEBUG 2b] act_win id=" + wId + " name=" + wName);
+                                    if (esRangoValido(wId, wName) && wId > bestId) { bestId = wId; bestName = wName; }
+                                }
+                                if (bestName != null) return bestName + etq;
+                            } else {
+                                System.out.println("[DEBUG 2b] act_wins missing");
+                            }
+                        }
+                    } else {
+                        System.out.println("[DEBUG 2] seasonal missing/null");
+                    }
+
+                    // peak
+                    if (data.has("peak") && !data.get("peak").isJsonNull()) {
+                        com.google.gson.JsonObject peak = data.getAsJsonObject("peak");
+                        System.out.println("[DEBUG 3] peak=" + peak);
+                        if (peak.has("tier") && !peak.get("tier").isJsonNull()) {
+                            com.google.gson.JsonObject t = peak.getAsJsonObject("tier");
+                            int pId = t.has("id") ? t.get("id").getAsInt() : -1;
+                            String pName = t.has("name") ? t.get("name").getAsString() : null;
+                            System.out.println("[DEBUG 3] peak.tier id=" + pId + " name=" + pName);
+                            if (esRangoValido(pId, pName)) {
+                                String ps = "";
+                                if (peak.has("season") && !peak.get("season").isJsonNull()) {
+                                    com.google.gson.JsonObject season = peak.getAsJsonObject("season");
+                                    if (season.has("short") && !season.get("short").isJsonNull())
+                                        ps = " (" + season.get("short").getAsString() + ")";
+                                }
+                                return pName + ps;
+                            }
+                        }
+                    } else {
+                        System.out.println("[DEBUG 3] peak missing/null");
+                    }
                 }
             }
 
+            // 4. mmr-history v2
+            HttpRequest req2 = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.henrikdev.xyz/valorant/v2/mmr-history/eu/pc/" + gameName + "/" + tagLine))
+                    .header("Accept", "application/json")
+                    .header("Authorization", HENRIK_KEY)
+                    .GET().build();
+
+            HttpResponse<String> res2 = client.send(req2, HttpResponse.BodyHandlers.ofString());
+            System.out.println("[DEBUG MMR-HIST] " + riotId + " HTTP=" + res2.statusCode());
+            System.out.println("[DEBUG MMR-HIST BODY] " + res2.body());
+
+            if (res2.statusCode() == 200) {
+                com.google.gson.JsonObject hRoot = com.google.gson.JsonParser.parseString(res2.body()).getAsJsonObject();
+                System.out.println("[DEBUG MMR-HIST KEYS] " + hRoot.keySet());
+                if (hRoot.has("data") && !hRoot.get("data").isJsonNull()) {
+                    com.google.gson.JsonObject hData = hRoot.getAsJsonObject("data");
+                    System.out.println("[DEBUG MMR-HIST DATA KEYS] " + hData.keySet());
+                    if (hData.has("history") && !hData.get("history").isJsonNull()) {
+                        com.google.gson.JsonArray hist = hData.getAsJsonArray("history");
+                        System.out.println("[DEBUG 4] history.size=" + hist.size());
+                        if (hist.size() > 0) {
+                            com.google.gson.JsonObject h0 = hist.get(0).getAsJsonObject();
+                            System.out.println("[DEBUG 4] history[0]=" + h0);
+                            if (h0.has("tier") && !h0.get("tier").isJsonNull()) {
+                                com.google.gson.JsonObject t = h0.getAsJsonObject("tier");
+                                int hId = t.has("id") ? t.get("id").getAsInt() : -1;
+                                String hName = t.has("name") ? t.get("name").getAsString() : null;
+                                System.out.println("[DEBUG 4] history[0].tier id=" + hId + " name=" + hName);
+                                if (esRangoValido(hId, hName)) {
+                                    String etq = "";
+                                    if (h0.has("season") && !h0.get("season").isJsonNull()) {
+                                        com.google.gson.JsonObject season = h0.getAsJsonObject("season");
+                                        if (season.has("short") && !season.get("short").isJsonNull())
+                                            etq = " (" + season.get("short").getAsString() + ")";
+                                    }
+                                    return hName + etq;
+                                }
+                            } else {
+                                System.out.println("[DEBUG 4] history[0] tier missing. Keys=" + h0.keySet());
+                            }
+                        }
+                    } else {
+                        System.out.println("[DEBUG 4] history key missing. hData keys=" + hData.keySet());
+                    }
+                }
+            }
+
+            System.out.println("[DEBUG FINAL] " + riotId + " → Sin rango");
             return "Sin rango";
 
         } catch (Exception e) {
-            System.out.println("Error obteniendo rango de Valorant.");
+            System.out.println("[DEBUG EXCEPCION] " + e.getMessage());
+            e.printStackTrace();
             return "Error";
         }
     }
+
+    private static boolean esRangoValido(int id, String nombre) {
+        if (id <= 1 || nombre == null) return false;
+        return !"Unrated".equalsIgnoreCase(nombre);
+    }
+
+    private static String obtenerEtiquetaTemporada(com.google.gson.JsonObject temporada) {
+        if (!temporada.has("season") || temporada.get("season").isJsonNull()) return "";
+        com.google.gson.JsonObject season = temporada.getAsJsonObject("season");
+        if (!season.has("short") || season.get("short").isJsonNull()) return "";
+        return " (" + season.get("short").getAsString() + ")";
+    }
+
 
     public static String obtenerRangoLol(String puuid) {
         try {
