@@ -233,8 +233,8 @@ public class MasterPassword extends javax.swing.JFrame {
 
             reiniciarProteccionBruteforce();
             MenuPrincipal principal = new MenuPrincipal();
-            principal.setVisible(true);
             principal.setLocationRelativeTo(null);
+            principal.setVisible(true);
             dispose();
 
         } finally {
